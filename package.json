@@ -1,6 +1,7 @@
 {
   "name": "pong-multiplayer",
   "version": "1.0.0",
+  "description": "Multiplayer Pong Game",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -14,6 +15,6 @@
     "nodemon": "^2.0.22"
   },
   "engines": {
-    "node": ">=14.0.0"
+    "node": "18.x"
   }
 }
