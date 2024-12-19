@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>PONG Multiplayer</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background: #000;
+            color: white;
+            font-family: Arial;
+        }
+        canvas {
+            border: 2px solid white;
+            margin: 20px;
+            display: none;
+        }
+        #status {
+            color: white;
+            font-size: 24px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        #controls {
+            color: #888;
+            margin-top: 20px;
+            display: none;
+        }
+        #startButton {
+            background: #4CAF50;
+            border: none;
+            color: white;
+            padding: 15px 32px;
+            text-align: center;
+            text-decoration: none;
+            font-size: 16px;
+            margin: 4px 2px;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: 0.3s;
+            display: none;
+        }
+        #startButton:hover {
+            background: #45a049;
+        }
+        #startButton:disabled {
+            background: #cccccc;
+            cursor: not-allowed;
+        }
+        #debug {
+            position: fixed;
+            bottom: 10px;
+            left: 10px;
+            color: #666;
+            font-size: 12px;
+        }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
+</head>
+<body>
+    <div id="status">Conectando ao servidor...</div>
+    <button id="startButton">Iniciar Jogo</button>
+    <canvas id="pongCanvas" width="800" height="400"></canvas>
+    <div id="controls">Use as setas ↑ e ↓ para mover sua raquete</div>
+    <div id="debug"></div>
+
+    <script>
+        const canvas = document.getElementById('pongCanvas');
+        const ctx = canvas.getContext('2d');
+        const statusDiv = document.getElementById('status');
+        const controlsDiv = document.getElementById('controls');
+        const startButton = document.getElementById('startButton');
+        const debugDiv = document.getElementById('debug');
+        
+        const socket = io();
+        let playerNumber = 0;
+        let gameState = null;
+        let bothPlayersConnected = false;
+        let lastUpdate = Date.now();
+
+        // Configurações do paddle
+        const PADDLE_SPEED = 15;
+        const PADDLE_SMOOTH_FACTOR = 0.8;
+        let keyState = {
+            ArrowUp: false,
+            ArrowDown: false
+        };
+        let currentPaddleVelocity = 0;
+        const MAX_PADDLE_VELOCITY = PADDLE_SPEED;
+
+        function log(message) {
+            console.log(message);
+            debugDiv.textContent = `${new Date().toLocaleTimeString()} - ${message}`;
+        }
+
+        socket.on('connect', () => {
+            log('🟢 Connected to server');
+        });
+
+        socket.on('disconnect', () => {
+            log('🔴 Disconnected from server');
+        });
+
+        socket.on('playerNumber', (number) => {
+            playerNumber = number;
+            log(`🎮 Assigned as Player ${number}`);
+            if (number === 1) {
+                statusDiv.textContent = 'Você é o Jogador 1. Aguardando Jogador 2...';
+            } else {
+                statusDiv.textContent = 'Você é o Jogador 2. Aguardando Jogador 1 iniciar...';
+            }
+            updateStartButton();
+        });
+
+        socket.on('playersUpdate', (data) => {
+            bothPlayersConnected = data.bothConnected;
+            log(`👥 Players update: ${bothPlayersConnected ? 'both connected' : 'waiting for players'}`);
+            
+            if (playerNumber === 1) {
+                if (bothPlayersConnected) {
+                    statusDiv.textContent = 'Jogador 2 conectado! Você pode iniciar o jogo.';
+                    startButton.style.display = 'block';
+                } else {
+                    statusDiv.textContent = 'Aguardando Jogador 2...';
+                    startButton.style.display = 'none';
+                }
+            } else {
+                startButton.style.display = 'none';
+                if (bothPlayersConnected) {
+                    statusDiv.textContent = 'Aguardando Jogador 1 iniciar o jogo...';
+                }
+            }
+        });
+
+        function updateStartButton() {
+            startButton.style.display = (playerNumber === 1 && bothPlayersConnected) ? 'block' : 'none';
+        }
+
+        startButton.addEventListener('click', () => {
+            if (playerNumber === 1 && bothPlayersConnected) {
+                log('🎯 Requesting game start');
+                socket.emit('startGame');
+            }
+        });
+
+        socket.on('gameStart', (state) => {
+            log('🎮 Game started!');
+            gameState = state;
+            canvas.style.display = 'block';
+            controlsDiv.style.display = 'block';
+            startButton.style.display = 'none';
+            statusDiv.textContent = `Jogador ${playerNumber} - Jogo em andamento!`;
+        });
+
+        socket.on('gameStateUpdate', (state) => {
+            const now = Date.now();
+            if (now - lastUpdate > 5000) {
+                log(`🔄 Ball position: (${Math.round(state.ball.x)}, ${Math.round(state.ball.y)})`);
+                lastUpdate = now;
+            }
+            gameState = state;
+        });
+
+        socket.on('playerDisconnected', () => {
+            log('👋 Other player disconnected');
+            gameState = null;
+            canvas.style.display = 'none';
+            controlsDiv.style.display = 'none';
+            startButton.style.display = 'none';
+            if (playerNumber === 1) {
+                statusDiv.textContent = 'Jogador 2 desconectou. Aguardando novo jogador...';
+            } else {
+                statusDiv.textContent = 'Jogador 1 desconectou. Aguardando reconexão...';
+            }
+        });
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                keyState[e.key] = true;
+                e.preventDefault();
+            }
+        });
+
+        document.addEventListener('keyup', (e) => {
+            if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                keyState[e.key] = false;
+            }
+        });
+
+        function updatePaddlePosition() {
+            if (!gameState) return;
+
+            const paddle = playerNumber === 1 ? gameState.paddles.player1 : gameState.paddles.player2;
+            let targetVelocity = 0;
+
+            if (keyState.ArrowUp && paddle.y > 0) {
+                targetVelocity = -MAX_PADDLE_VELOCITY;
+            } else if (keyState.ArrowDown && paddle.y < canvas.height - 80) {
+                targetVelocity = MAX_PADDLE_VELOCITY;
+            }
+
+            currentPaddleVelocity = currentPaddleVelocity * (1 - PADDLE_SMOOTH_FACTOR) + 
+                                  targetVelocity * PADDLE_SMOOTH_FACTOR;
+
+            if (Math.abs(currentPaddleVelocity) < 0.1) {
+                currentPaddleVelocity = 0;
+            }
+
+            if (currentPaddleVelocity !== 0) {
+                let newY = paddle.y + currentPaddleVelocity;
+                newY = Math.max(0, Math.min(canvas.height - 80, newY));
+                
+                if (newY !== paddle.y) {
+                    paddle.y = newY;
+                    socket.emit('paddleMove', { y: paddle.y });
+                }
+            }
+        }
+
+        function render() {
+            if (!gameState) {
+                requestAnimationFrame(render);
+                return;
+            }
+
+            updatePaddlePosition();
+
+            ctx.fillStyle = 'black';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Linha central
+            ctx.strokeStyle = 'white';
+            ctx.setLineDash([5, 15]);
+            ctx.beginPath();
+            ctx.moveTo(canvas.width / 2, 0);
+            ctx.lineTo(canvas.width / 2, canvas.height);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Pontuação
+            ctx.font = '48px Arial';
+            ctx.fillStyle = 'white';
+            ctx.fillText(gameState.paddles.player1.score, canvas.width / 4, 50);
+            ctx.fillText(gameState.paddles.player2.score, 3 * canvas.width / 4, 50);
+
+            // Paddles
+            ctx.fillStyle = 'white';
+            ctx.fillRect(20, gameState.paddles.player1.y, 10, 80);
+            ctx.fillRect(canvas.width - 30, gameState.paddles.player2.y, 10, 80);
+
+            // Bola
+            ctx.beginPath();
+            ctx.arc(gameState.ball.x, gameState.ball.y, gameState.ball.size, 0, Math.PI * 2);
+            ctx.fill();
+
+            requestAnimationFrame(render);
+        }
+
+        render();
+    </script>
+</body>
+</html>
