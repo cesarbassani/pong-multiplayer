@@ -3,14 +3,20 @@ const http = require('http');
 const { Server } = require('socket.io');
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
-const PORT = process.env.PORT || 3000;
+const io = new Server(server, {
+    pingInterval: 2000,
+    pingTimeout: 5000,
+    cors: {
+        origin: "*",
+        methods: ["GET", "POST"]
+    }
+});
 
 app.use(express.static('public'));
 
 // Configurações da bola
 const INITIAL_BALL_SPEED = 3;
-const BALL_ACCELERATION = 1.1;
+const BALL_ACCELERATION = 1.2;
 const MAX_BALL_SPEED = 15;
 
 const gameState = {
@@ -75,7 +81,7 @@ io.on('connection', (socket) => {
             } else {
                 gameState.paddles.player2.y = data.y;
             }
-            io.emit('gameStateUpdate', gameState);
+            socket.broadcast.emit('gameStateUpdate', gameState);
         }
     });
 
@@ -93,44 +99,46 @@ io.on('connection', (socket) => {
     });
 });
 
-// Reset da bola com direção baseada no último ponto
 function resetBall(scoringPlayer = null) {
     gameState.ball.x = 400;
     gameState.ball.y = 200;
     gameState.ball.currentSpeed = INITIAL_BALL_SPEED;
 
-    // Direção aleatória vertical
-    const randomVertical = Math.random() * 2 - 1; // valor entre -1 e 1
+    const randomVertical = Math.random() * 2 - 1;
     
     if (scoringPlayer === 1) {
-        // Bola vai em direção ao Player 1 (esquerda)
         gameState.ball.speedX = -INITIAL_BALL_SPEED;
     } else if (scoringPlayer === 2) {
-        // Bola vai em direção ao Player 2 (direita)
         gameState.ball.speedX = INITIAL_BALL_SPEED;
     } else {
-        // Direção horizontal aleatória no início do jogo
         gameState.ball.speedX = Math.random() > 0.5 ? INITIAL_BALL_SPEED : -INITIAL_BALL_SPEED;
     }
     
     gameState.ball.speedY = INITIAL_BALL_SPEED * randomVertical;
 }
 
+const GAME_UPDATE_INTERVAL = 1000 / 60;
+let lastGameUpdate = Date.now();
+
 setInterval(() => {
+    const now = Date.now();
+    const delta = now - lastGameUpdate;
+    
     if (gameState.gameStarted && players.length === 2) {
-        // Atualiza posição da bola
-        gameState.ball.x += gameState.ball.speedX;
-        gameState.ball.y += gameState.ball.speedY;
+        const moveRatio = delta / GAME_UPDATE_INTERVAL;
+        gameState.ball.x += gameState.ball.speedX * moveRatio;
+        gameState.ball.y += gameState.ball.speedY * moveRatio;
 
         // Colisão com paredes (topo e base)
         if (gameState.ball.y <= 0 || gameState.ball.y >= 400) {
             gameState.ball.speedY *= -1;
         }
 
-        // Colisão com paddles
+        // Colisão com paddle do Player 1
         if (gameState.ball.x <= 30 && 
             gameState.ball.y >= gameState.paddles.player1.y && 
             gameState.ball.y <= gameState.paddles.player1.y + 80) {
+            
             // Inverte direção X
             gameState.ball.speedX *= -1;
             
@@ -143,9 +151,11 @@ setInterval(() => {
             gameState.ball.speedY *= speedRatio;
         }
 
+        // Colisão com paddle do Player 2
         if (gameState.ball.x >= 760 && 
             gameState.ball.y >= gameState.paddles.player2.y && 
             gameState.ball.y <= gameState.paddles.player2.y + 80) {
+            
             // Inverte direção X
             gameState.ball.speedX *= -1;
             
@@ -169,12 +179,15 @@ setInterval(() => {
 
         io.emit('gameStateUpdate', gameState);
     }
-}, 1000/60);
+    
+    lastGameUpdate = now;
+}, GAME_UPDATE_INTERVAL);
+
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+});
 
 // server.listen(3000, () => {
 //     console.log('Server running on http://localhost:3000');
 // });
-
-server.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-});

@@ -84,13 +84,13 @@
 
         // Configurações do paddle
         const PADDLE_SPEED = 15;
-        const PADDLE_SMOOTH_FACTOR = 0.8;
+        const PADDLE_UPDATE_INTERVAL = 16; // ~60fps
+        let lastPaddleUpdate = 0;
+        let localPaddleY = 160; // Posição local da raquete
         let keyState = {
             ArrowUp: false,
             ArrowDown: false
         };
-        let currentPaddleVelocity = 0;
-        const MAX_PADDLE_VELOCITY = PADDLE_SPEED;
 
         function log(message) {
             console.log(message);
@@ -107,6 +107,7 @@
 
         socket.on('playerNumber', (number) => {
             playerNumber = number;
+            localPaddleY = 160; // Reset posição local
             log(`🎮 Assigned as Player ${number}`);
             if (number === 1) {
                 statusDiv.textContent = 'Você é o Jogador 1. Aguardando Jogador 2...';
@@ -162,6 +163,14 @@
                 log(`🔄 Ball position: (${Math.round(state.ball.x)}, ${Math.round(state.ball.y)})`);
                 lastUpdate = now;
             }
+
+            // Mantém a posição local para o jogador atual
+            if (playerNumber === 1) {
+                state.paddles.player1.y = localPaddleY;
+            } else {
+                state.paddles.player2.y = localPaddleY;
+            }
+            
             gameState = state;
         });
 
@@ -194,29 +203,25 @@
         function updatePaddlePosition() {
             if (!gameState) return;
 
-            const paddle = playerNumber === 1 ? gameState.paddles.player1 : gameState.paddles.player2;
-            let targetVelocity = 0;
-
-            if (keyState.ArrowUp && paddle.y > 0) {
-                targetVelocity = -MAX_PADDLE_VELOCITY;
-            } else if (keyState.ArrowDown && paddle.y < canvas.height - 80) {
-                targetVelocity = MAX_PADDLE_VELOCITY;
+            const now = Date.now();
+            let moved = false;
+            
+            // Atualização local imediata
+            if (keyState.ArrowUp && localPaddleY > 0) {
+                localPaddleY = Math.max(0, localPaddleY - PADDLE_SPEED);
+                moved = true;
+            }
+            if (keyState.ArrowDown && localPaddleY < canvas.height - 80) {
+                localPaddleY = Math.min(canvas.height - 80, localPaddleY + PADDLE_SPEED);
+                moved = true;
             }
 
-            currentPaddleVelocity = currentPaddleVelocity * (1 - PADDLE_SMOOTH_FACTOR) + 
-                                  targetVelocity * PADDLE_SMOOTH_FACTOR;
-
-            if (Math.abs(currentPaddleVelocity) < 0.1) {
-                currentPaddleVelocity = 0;
-            }
-
-            if (currentPaddleVelocity !== 0) {
-                let newY = paddle.y + currentPaddleVelocity;
-                newY = Math.max(0, Math.min(canvas.height - 80, newY));
-                
-                if (newY !== paddle.y) {
-                    paddle.y = newY;
-                    socket.emit('paddleMove', { y: paddle.y });
+            // Atualiza localmente
+            if (moved) {
+                // Envia ao servidor com throttle
+                if (now - lastPaddleUpdate > PADDLE_UPDATE_INTERVAL) {
+                    socket.emit('paddleMove', { y: localPaddleY });
+                    lastPaddleUpdate = now;
                 }
             }
         }
@@ -229,6 +234,7 @@
 
             updatePaddlePosition();
 
+            // Renderização
             ctx.fillStyle = 'black';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
 
@@ -247,10 +253,15 @@
             ctx.fillText(gameState.paddles.player1.score, canvas.width / 4, 50);
             ctx.fillText(gameState.paddles.player2.score, 3 * canvas.width / 4, 50);
 
-            // Paddles
+            // Paddles - usando localPaddleY para o jogador atual
             ctx.fillStyle = 'white';
-            ctx.fillRect(20, gameState.paddles.player1.y, 10, 80);
-            ctx.fillRect(canvas.width - 30, gameState.paddles.player2.y, 10, 80);
+            if (playerNumber === 1) {
+                ctx.fillRect(20, localPaddleY, 10, 80); // Paddle local
+                ctx.fillRect(canvas.width - 30, gameState.paddles.player2.y, 10, 80); // Paddle remoto
+            } else {
+                ctx.fillRect(20, gameState.paddles.player1.y, 10, 80); // Paddle remoto
+                ctx.fillRect(canvas.width - 30, localPaddleY, 10, 80); // Paddle local
+            }
 
             // Bola
             ctx.beginPath();
